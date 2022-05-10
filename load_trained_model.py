@@ -98,3 +98,11 @@ df.columns
 # %%
 df.loc[199,"evaluation/episode_reward_mean"]
 # %%
+
+# %%
+num_params=0
+for name,param in model.state_dict().items():
+    print(f"{name}: {param.numel()}")
+    num_params+=param.numel()
+print(f"params: {num_params}")
+# %%

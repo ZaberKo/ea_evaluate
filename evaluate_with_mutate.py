@@ -177,8 +177,28 @@ def run(args, parser):
     # `Trainer.train()` here.
     config["evaluation_interval"] = 1
 
+    # ======== limit atari max timesteps ===========
+    import gym
+    from gym.wrappers import TimeLimit
+    from ray.rllib.env.wrappers.atari_wrappers import get_wrapper_by_cls
+    from ray.tune.registry import register_env
 
+    env_name=args.env or config["env"]
+    max_episode_steps=3600*5 # at most 5min
 
+    def env_creator(env_config):
+        env=gym.make(env_name,**env_config)
+        timelimit_wrapper=get_wrapper_by_cls(env, TimeLimit)
+        new_env=TimeLimit(timelimit_wrapper.env, max_episode_steps=max_episode_steps)
+        return new_env
+
+    new_env_name=env_name+f"-TimeLimit{max_episode_steps}"
+    register_env(new_env_name,env_creator)
+
+    config["env"]=new_env_name
+    args.env=new_env_name
+
+    # ======================================
 
     ray.init(local_mode=args.local_mode)
 
@@ -206,8 +226,14 @@ def run(args, parser):
     print(baseline_result.hist_episode_reward)
     print("="*20)
 
+    def deepcopy(weights:dict):
+        new_weights={}
+        for k,v in weights.items():
+            new_weights[k]=v.copy()
+        return new_weights
+
     for i in range(100):
-        modelweights=copy.deepcopy(modelweights_ori)
+        modelweights=deepcopy(modelweights_ori)
         mutate_inplace(modelweights,weight_magnitude=1e7)
         trainer.set_weights({DEFAULT_POLICY_ID:modelweights})
 

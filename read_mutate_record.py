@@ -11,10 +11,12 @@ def load(path):
 
 
 #%%
-for it in [10,50,100,150]:
-    data=load(f"eval_result_hard_20_15/mutate_result_{it}.pkl")
+for it in [10,50,100,150,200]:
+    data=load(f"eval_result_hard_20_15_without_conv/mutate_result_{it}.pkl")
+    
 
     baseline_result=data["baseline"]
+    print(f"sampled epsiodes: {len(baseline_result.hist_episode_reward)}")
     print(f"baseline: {baseline_result.summary()}")
     # print(baseline_result.hist_episode_length)
     # print(baseline_result.hist_episode_reward)
