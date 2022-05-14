@@ -5,7 +5,12 @@ import collections
 import copy
 import pickle
 import gym
-from gym import wrappers as gym_wrappers
+
+from gym.wrappers import TimeLimit
+from ray.rllib.env.wrappers.atari_wrappers import get_wrapper_by_cls
+from ray.tune.registry import register_env
+
+
 import json
 import os
 from pathlib import Path
@@ -13,28 +18,24 @@ import shelve
 import numpy as np
 
 import yaml
-from utils import import_policy_class
+from utils import import_policy_class,deepcopy_np_weights
 
 from tqdm import tqdm
 
 import ray
 import ray.cloudpickle as cloudpickle
 from ray.rllib.agents.registry import get_trainer_class
-from ray.rllib.env import MultiAgentEnv
-from ray.rllib.env.base_env import _DUMMY_AGENT_ID
-from ray.rllib.env.env_context import EnvContext
 from ray.rllib.evaluation.worker_set import WorkerSet
 from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
-from ray.rllib.utils.deprecation import deprecation_warning
-from ray.rllib.utils.spaces.space_utils import flatten_to_single_ndarray
 from ray.tune.utils import merge_dicts
 from ray.tune.registry import get_trainable_cls, _global_registry, ENV_CREATOR
 from ray.rllib.utils.debug import summarize
-from collections import namedtuple
 
 from ray.rllib.evaluation import RolloutWorker
 
 from mutation import mutate_inplace
+
+from tqdm import trange
 
 EXAMPLE_USAGE = """
 Example usage via RLlib CLI:
@@ -93,17 +94,10 @@ def create_parser(parser_creator=None):
         "--local-mode",
         action="store_true",
         help="Run ray in local mode for easier debugging.")
-
-
-    parser.add_argument(
-        "--steps",
-        default=0,
-        help="Number of timesteps to roll out. Rollout will also stop if "
-        "`--episodes` limit is reached first. A value of 0 means no "
-        "limitation on the number of timesteps run.")
     parser.add_argument(
         "--episodes",
         default=1,
+        type=int,
         help="Number of complete episodes to roll out. Rollout will also stop "
         "if `--steps` (timesteps) limit is reached first. A value of 0 means "
         "no limitation on the number of episodes run.")
@@ -115,6 +109,7 @@ def create_parser(parser_creator=None):
         "Gets merged with loaded configuration from checkpoint file and "
         "`evaluation_config` settings therein.")
     parser.add_argument("--out", default="mutate_record.pkl", help="Output filename.")
+    parser.add_argument("--mutate_nums",type=int,default=100)
 
     return parser
 
@@ -177,11 +172,13 @@ def run(args, parser):
     # `Trainer.train()` here.
     config["evaluation_interval"] = 1
 
+    # reset evaluation_duratio
+    lives=gym.make(args.env).unwrapped.ale.lives()
+    config["evaluation_duration"]=args.episodes*lives
+    print(f'{args.env} has {lives} lives, set evaluation_duation={config["evaluation_duration"]}')
+
     # ======== limit atari max timesteps ===========
-    import gym
-    from gym.wrappers import TimeLimit
-    from ray.rllib.env.wrappers.atari_wrappers import get_wrapper_by_cls
-    from ray.tune.registry import register_env
+
 
     env_name=args.env or config["env"]
     max_episode_steps=3600*5 # at most 5min
@@ -199,25 +196,34 @@ def run(args, parser):
     args.env=new_env_name
 
     # ======================================
+    # bug fix for ray1.12.0
+    import psutil
+    psutil_memory_in_bytes = psutil.virtual_memory().total
+    ray._private.utils.get_system_memory = lambda: psutil_memory_in_bytes
+    # ======================================
 
-    ray.init(local_mode=args.local_mode)
+    ray.init(local_mode=args.local_mode,num_gpus=0)
+    
 
     # Create the Trainer from config.
     # cls = get_trainable_cls(args.run)
     cls=import_policy_class(args.run)
-    trainer = cls(env=args.env, config=config)
+    trainer = cls(config=config)
 
     # Load state from checkpoint, if provided.
     if args.checkpoint:
         trainer.restore(args.checkpoint)
 
-    num_steps = int(args.steps)
-    num_episodes = int(args.episodes)
+    num_episodes = args.episodes
+    num_steps=None
 
-    modelweights_ori=trainer.get_weights()[DEFAULT_POLICY_ID]
+    # note: deepcopy to avoid connection to real model weights
+    modelweights_ori=deepcopy_np_weights(
+        trainer.get_weights()[DEFAULT_POLICY_ID]
+    )
 
     results={}
-    # baseline
+    # ======== baseline ============
     baseline_result=rollout(trainer,num_steps,num_episodes)
 
     results["baseline"]=baseline_result
@@ -226,27 +232,25 @@ def run(args, parser):
     print(baseline_result.hist_episode_reward)
     print("="*20)
 
-    def deepcopy(weights:dict):
-        new_weights={}
-        for k,v in weights.items():
-            new_weights[k]=v.copy()
-        return new_weights
-
-    for i in range(100):
-        modelweights=deepcopy(modelweights_ori)
+    # ======== mutation ===========
+    for i in trange(args.mutate_nums):
+        modelweights=deepcopy_np_weights(modelweights_ori)
         mutate_inplace(modelweights,weight_magnitude=1e7)
         trainer.set_weights({DEFAULT_POLICY_ID:modelweights})
 
         result=rollout(trainer, num_steps, num_episodes)
         results[f"mutation {i}"]=result
         print(f"mutation {i}: {result.summary()}")
-        print(result.hist_episode_length)
-        print(result.hist_episode_reward)
+        # print(result.hist_episode_length)
+        # print(result.hist_episode_reward)
         print("="*20)
 
     trainer.stop()
 
-    with open(args.out,'wb') as f:
+    p=Path(args.out).expanduser()
+    if not p.parent.exists():
+        p.parent.mkdir(parents=True)
+    with p.open(mode="wb") as f:
         pickle.dump(results,f)
 
 

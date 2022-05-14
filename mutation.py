@@ -3,7 +3,7 @@ from ray.rllib.utils.typing import ModelWeights
 
 def mutate_inplace(gene: ModelWeights,weight_magnitude:float):
     mut_strength = 0.1
-    num_mutation_frac = 0.05
+    num_mutation_frac = 0.5
     super_mut_strength = 10
     super_mut_prob = 0.05
     reset_prob = super_mut_prob + 0.02
@@ -13,8 +13,18 @@ def mutate_inplace(gene: ModelWeights,weight_magnitude:float):
 
     mutate_count=0
     for name, W in gene.items():  # Mutate each param
-        if "_convs" in name:
+        if "_convs" in name or "_value" in name:
             continue
+
+        need_reshape=False
+
+        _W=np.squeeze(W) # return a view of W (shadow copy)
+        if len(_W.shape)<=2 and len(W.shape)>2:
+            shape=W.shape
+            need_reshape=True
+            # W_ref=W
+            W=_W
+
         if len(W.shape) == 2:  # Weights, no bias
             mutate_count+=1
 
@@ -61,4 +71,9 @@ def mutate_inplace(gene: ModelWeights,weight_magnitude:float):
                 # Regularization hard limit
                 W[ind_dim] = np.clip(
                     W[ind_dim], -weight_magnitude, weight_magnitude)
+
+        # if need_reshape:
+        #     np.copyto(dst=W_ref,src=W.reshape(shape))
+
+            
     print(f"mutated number of params: {mutate_count}")

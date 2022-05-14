@@ -8,8 +8,12 @@ import ray
 from utils import merge_dicts, import_policy_class
 
 
-checkpoint="/root/workspace/model_data/ImpalaTrainer_2022-04-19_12-12-17/ImpalaTrainer_BreakoutNoFrameskip-v4_e6b7f_00000_0_2022-04-19_12-12-18/checkpoint_000200/checkpoint-200"
-env=None
+checkpoint="/root/workspace/model_data/ImpalaTrainer_2022-05-08_01-25-34/ImpalaTrainer_SpaceInvadersNoFrameskip-v4-TimeLimit40000_b432f_00000_0_2022-05-08_01-25-35/checkpoint_000200/checkpoint-200"
+env="SpaceInvadersNoFrameskip-v4"
+
+import psutil
+psutil_memory_in_bytes = psutil.virtual_memory().total
+ray._private.utils.get_system_memory = lambda: psutil_memory_in_bytes
 ray.init(num_gpus=0)
 
 #%%
@@ -71,6 +75,7 @@ config["evaluation_interval"] = 1
 #%%
 # Create the Trainer from config.
 # cls = get_trainable_cls(args.run)
+
 cls = import_policy_class("ref.impala.ImpalaTrainer")
 trainer = cls(env=env, config=config)
 
@@ -81,28 +86,51 @@ model=policy.model
 # %%
 params=model.state_dict()
 print(params.keys())
-# %%
-params2=policy.get_weights()
-params2
-# %%
-import torch
-import numpy as np
-for k in params2.keys():
-    print(torch.equal(params[k].cpu(),torch.from_numpy(params2[k])))
-# %%
-import pandas as pd
-
-df=pd.read_csv("/root/workspace/model_data/ImpalaTrainer_2022-04-19_12-12-17/ImpalaTrainer_BreakoutNoFrameskip-v4_e6b7f_00000_0_2022-04-19_12-12-18/progress.csv")
-# %%
-df.columns
-# %%
-df.loc[199,"evaluation/episode_reward_mean"]
-# %%
 
 # %%
 num_params=0
 for name,param in model.state_dict().items():
-    print(f"{name}: {param.numel()}")
+    print(f"{name}: {param.shape} {param.numel()}")
     num_params+=param.numel()
 print(f"params: {num_params}")
 # %%
+from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
+
+weights=trainer.get_weights()[DEFAULT_POLICY_ID]
+# %%
+from mutation import mutate_inplace
+def deepcopy(weights:dict):
+    new_weights={}
+    for k,v in weights.items():
+        new_weights[k]=v.copy()
+    return new_weights
+
+# import copy
+# ori_weights=copy.deepcopy(weights)
+
+
+new_weights=deepcopy(weights)
+new_weights2=deepcopy(weights)
+
+#%%
+for name,param in new_weights.items():
+    print(name,param.shape)
+    param=0
+    break
+
+
+# %%
+import numpy as np
+for name in weights.keys():
+    print(np.array_equal(new_weights[name],new_weights2[name]))
+# %%
+
+
+def is_equal(weights1,weights2):
+    for name in weights1.keys():
+        flag=np.array_equal(weights1[name],weights2[name])
+        if not flag:
+            print(f"{name}: {weights1[name].shape} not equal")
+            return False
+    
+    return True
