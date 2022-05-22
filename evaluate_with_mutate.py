@@ -6,8 +6,8 @@ import copy
 import pickle
 import gym
 
-from gym.wrappers import TimeLimit
-from ray.rllib.env.wrappers.atari_wrappers import get_wrapper_by_cls
+from gym.wrappers import TimeLimit, AtariPreprocessing
+from ray.rllib.env.wrappers.atari_wrappers import get_wrapper_by_cls, MonitorEnv,FrameStack
 from ray.tune.registry import register_env
 
 
@@ -18,7 +18,7 @@ import shelve
 import numpy as np
 
 import yaml
-from utils import import_policy_class,deepcopy_np_weights
+from utils import import_policy_class, deepcopy_np_weights,MyMonitorEnv
 
 from tqdm import tqdm
 
@@ -31,7 +31,7 @@ from ray.tune.utils import merge_dicts
 from ray.tune.registry import get_trainable_cls, _global_registry, ENV_CREATOR
 from ray.rllib.utils.debug import summarize
 
-from ray.rllib.evaluation import RolloutWorker
+from ray.rllib.evaluation import RolloutWorker,sampler
 
 from mutation import mutate_inplace
 
@@ -108,21 +108,21 @@ def create_parser(parser_creator=None):
         help="Algorithm-specific configuration (e.g. env, hyperparams). "
         "Gets merged with loaded configuration from checkpoint file and "
         "`evaluation_config` settings therein.")
-    parser.add_argument("--out", default="mutate_record.pkl", help="Output filename.")
-    parser.add_argument("--mutate_nums",type=int,default=100)
+    parser.add_argument("--out", default="mutate_record.pkl",
+                        help="Output filename.")
+    parser.add_argument("--mutate_nums", type=int, default=100)
 
     return parser
 
 
 def run(args, parser):
     with open(args.config, "rb") as f:
-        myconfig=yaml.safe_load(f)
-
+        myconfig = yaml.safe_load(f)
 
     # Load configuration from checkpoint file.
     config_path = ""
     if args.checkpoint:
-        args.checkpoint=os.path.expanduser(args.checkpoint)
+        args.checkpoint = os.path.expanduser(args.checkpoint)
         config_dir = os.path.dirname(args.checkpoint)
         config_path = os.path.join(config_dir, "params.pkl")
         # Try parent directory.
@@ -172,28 +172,52 @@ def run(args, parser):
     # `Trainer.train()` here.
     config["evaluation_interval"] = 1
 
-    # reset evaluation_duratio
-    lives=gym.make(args.env).unwrapped.ale.lives()
-    config["evaluation_duration"]=args.episodes*lives
-    print(f'{args.env} has {lives} lives, set evaluation_duation={config["evaluation_duration"]}')
+    # reset evaluation_duratio (no need for new wrapper)
+    # lives = gym.make(args.env).unwrapped.ale.lives()
+    # config["evaluation_duration"] = args.episodes*lives
+    # print(
+    #     f'{args.env} has {lives} lives, set evaluation_duation={config["evaluation_duration"]}')
 
     # ======== limit atari max timesteps ===========
 
+    env_name = args.env or config["env"]
+    max_episode_steps = 3600*20  # at most 20min
 
-    env_name=args.env or config["env"]
-    max_episode_steps=3600*5 # at most 5min
+    config["seed"]=None
+
+    config["evaluation_duration"]=args.episodes
+    num_episodes = args.episodes
+    num_steps = None
+
+    # disable default rllib atari deepmind wrappers
+    config["preprocessor_pref"] = None
 
     def env_creator(env_config):
-        env=gym.make(env_name,**env_config)
-        timelimit_wrapper=get_wrapper_by_cls(env, TimeLimit)
-        new_env=TimeLimit(timelimit_wrapper.env, max_episode_steps=max_episode_steps)
-        return new_env
+        env = gym.make(env_name, **env_config)
+        # timelimit_wrapper = get_wrapper_by_cls(env, TimeLimit)
 
-    new_env_name=env_name+f"-TimeLimit{max_episode_steps}"
-    register_env(new_env_name,env_creator)
+        # env = TimeLimit(timelimit_wrapper.env,
+        #                 max_episode_steps=max_episode_steps)
 
-    config["env"]=new_env_name
-    args.env=new_env_name
+        env = MyMonitorEnv(env)
+        env = AtariPreprocessing(env,
+                                 noop_max=30,
+                                 frame_skip=4,
+                                 screen_size=84,
+                                 terminal_on_life_loss=False,
+                                 grayscale_obs=True,
+                                 grayscale_newaxis=True,
+                                 scale_obs=False,
+                                 )
+
+        env = FrameStack(env, 4)
+        return env
+
+    new_env_name = env_name+f"-TimeLimit{max_episode_steps}"
+    register_env(new_env_name, env_creator)
+
+    config["env"] = new_env_name
+    args.env = new_env_name
 
     # ======================================
     # bug fix for ray1.12.0
@@ -202,31 +226,29 @@ def run(args, parser):
     ray._private.utils.get_system_memory = lambda: psutil_memory_in_bytes
     # ======================================
 
-    ray.init(local_mode=args.local_mode,num_gpus=0)
-    
+    ray.init(local_mode=args.local_mode, num_gpus=0)
 
     # Create the Trainer from config.
     # cls = get_trainable_cls(args.run)
-    cls=import_policy_class(args.run)
+    cls = import_policy_class(args.run)
     trainer = cls(config=config)
 
     # Load state from checkpoint, if provided.
     if args.checkpoint:
         trainer.restore(args.checkpoint)
 
-    num_episodes = args.episodes
-    num_steps=None
+
 
     # note: deepcopy to avoid connection to real model weights
-    modelweights_ori=deepcopy_np_weights(
+    modelweights_ori = deepcopy_np_weights(
         trainer.get_weights()[DEFAULT_POLICY_ID]
     )
 
-    results={}
+    results = {}
     # ======== baseline ============
-    baseline_result=rollout(trainer,num_steps,num_episodes)
+    baseline_result = rollout(trainer, num_steps, num_episodes*10)
 
-    results["baseline"]=baseline_result
+    results["baseline"] = baseline_result
     print(f"baseline: {baseline_result.summary()}")
     print(baseline_result.hist_episode_length)
     print(baseline_result.hist_episode_reward)
@@ -234,12 +256,12 @@ def run(args, parser):
 
     # ======== mutation ===========
     for i in trange(args.mutate_nums):
-        modelweights=deepcopy_np_weights(modelweights_ori)
-        mutate_inplace(modelweights,weight_magnitude=1e7)
-        trainer.set_weights({DEFAULT_POLICY_ID:modelweights})
+        modelweights = deepcopy_np_weights(modelweights_ori)
+        mutate_inplace(modelweights,num_mutation_frac=0.1)
+        trainer.set_weights({DEFAULT_POLICY_ID: modelweights})
 
-        result=rollout(trainer, num_steps, num_episodes)
-        results[f"mutation {i}"]=result
+        result = rollout(trainer, num_steps, num_episodes)
+        results[f"mutation {i}"] = result
         print(f"mutation {i}: {result.summary()}")
         # print(result.hist_episode_length)
         # print(result.hist_episode_reward)
@@ -247,23 +269,13 @@ def run(args, parser):
 
     trainer.stop()
 
-    p=Path(args.out).expanduser()
+    p = Path(args.out).expanduser()
     if not p.parent.exists():
         p.parent.mkdir(parents=True)
     with p.open(mode="wb") as f:
-        pickle.dump(results,f)
+        pickle.dump(results, f)
 
 
-class DefaultMapping(collections.defaultdict):
-    """default_factory now takes as an argument the missing key."""
-
-    def __missing__(self, key):
-        self[key] = value = self.default_factory(key)
-        return value
-
-
-def default_policy_agent_mapping(unused_agent_id):
-    return DEFAULT_POLICY_ID
 
 
 def keep_going(steps, num_steps, episodes, num_episodes):
@@ -281,17 +293,13 @@ def keep_going(steps, num_steps, episodes, num_episodes):
 def rollout(agent,
             num_steps,
             num_episodes=0,):
-    policy_agent_mapping = default_policy_agent_mapping
-
-
-
     # Normal case: Agent was setup correctly with an evaluation WorkerSet,
     # which we will now use to rollout.
     if hasattr(agent, "evaluation_workers") and isinstance(
             agent.evaluation_workers, WorkerSet):
         steps = 0
         episodes = 0
-        result=Record()
+        result = Record()
 
         while keep_going(steps, num_steps, episodes, num_episodes):
             eval_result = agent.evaluate()["evaluation"]
@@ -309,13 +317,16 @@ def rollout(agent,
 
 class Record:
     def __init__(self) -> None:
-        self.hist_episode_length=[]
-        self.hist_episode_reward=[]
-    def add(self,eval_result):
-        self.hist_episode_length+=eval_result["hist_stats"]["episode_lengths"]
-        self.hist_episode_reward+=eval_result["hist_stats"]["episode_reward"]
+        self.hist_episode_length = []
+        self.hist_episode_reward = []
+
+    def add(self, eval_result):
+        self.hist_episode_length += eval_result["hist_stats"]["episode_lengths"]
+        self.hist_episode_reward += eval_result["hist_stats"]["episode_reward"]
+
     def summary(self):
-        return f"episode_len_mean: {np.mean(self.hist_episode_length)}, episode_reward_mean: {np.mean(self.hist_episode_reward)}"
+        return f"eval_episodes: {len(self.hist_episode_length)}, episode_len_mean: {np.mean(self.hist_episode_length)}, episode_reward_mean: {np.mean(self.hist_episode_reward)}"
+
 
 def main():
     parser = create_parser()

@@ -57,3 +57,49 @@ def deepcopy_np_weights(weights: dict):
     for k, v in weights.items():
         new_weights[k] = v.copy()
     return new_weights
+
+import gym
+from gym.spaces import Box
+from ray.rllib.env.wrappers.atari_wrappers import MonitorEnv
+
+
+
+class MyMonitorEnv(MonitorEnv):
+    def __init__(self, env=None):
+        super().__init__(env)
+        self._total_steps=0
+        self._done=True
+
+    def reset(self, **kwargs):
+        obs = self.env.reset(**kwargs)
+
+        self._current_reward = 0
+        self._num_steps = 0
+
+        # handle horizon case
+        if not self._done:
+            self._episode_rewards.append(self._current_reward)
+            self._episode_lengths.append(self._num_steps)
+            self._num_episodes += 1
+            self._done=True
+
+
+        return obs
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        self._current_reward += rew
+        self._num_steps += 1
+        self._total_steps += 1
+
+        self._done=done
+
+        if done:
+            self._episode_rewards.append(self._current_reward)
+            self._episode_lengths.append(self._num_steps)
+            self._num_episodes += 1
+
+            # self._total_steps = sum(self._episode_lengths)
+
+
+        return (obs, rew, done, info)

@@ -1,12 +1,12 @@
 disable_env_checking: true
 num_workers: 0
-evaluation_num_workers: 50
-# evaluation_duration: 250
+evaluation_num_workers: 75
+evaluation_duration: 300
 evaluation_config:
   explore: false
   num_envs_per_worker: 1
 log_level: INFO
-horizon: 10000
-seed: 2333
+horizon: null
+# seed: 2333
 num_gpus: 0
 num_gpus_per_worker: 0

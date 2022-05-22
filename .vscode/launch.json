@@ -5,13 +5,21 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "Python: evaluate_mutate",
             "type": "python",
             "request": "launch",
             "program": "evaluate_with_mutate.py",
             "console": "integratedTerminal",
             "args": [
-                "~/workspace/model_data/ImpalaTrainer_2022-05-08_01-25-34/ImpalaTrainer_SpaceInvadersNoFrameskip-v4-TimeLimit40000_b432f_00000_0_2022-05-08_01-25-35/checkpoint_000011/checkpoint-11",
+                "/root/share_workspace/model/ImpalaTrainer_2022-05-09_21-32-28/ImpalaTrainer_QbertNoFrameskip-v4-TimeLimit18000_7889f_00000_0_2022-05-09_21-32-28/checkpoint_000100/checkpoint-100",
                 "--run",
                 "ref.impala.ImpalaTrainer",
                 "--episodes",
@@ -19,7 +27,7 @@
                 "--env",
                 "SpaceInvadersNoFrameskip-v4",
                 "--config",
-                "evaluate.yml"
+                "evaluate-cpu.yml"
             ],
             "justMyCode": false
         },
