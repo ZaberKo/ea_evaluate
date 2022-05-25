@@ -181,7 +181,7 @@ def run(args, parser):
     # ======== limit atari max timesteps ===========
 
     env_name = args.env or config["env"]
-    max_episode_steps = 3600*20  # at most 20min
+    max_episode_steps = 3600*5  # at most 20min
 
     config["seed"]=None
 

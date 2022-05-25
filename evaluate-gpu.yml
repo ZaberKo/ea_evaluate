@@ -1,6 +1,6 @@
 disable_env_checking: true
 num_workers: 0
-evaluation_num_workers: 40
+evaluation_num_workers: 60
 evaluation_duration: 300
 evaluation_config:
   explore: false
