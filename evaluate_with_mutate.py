@@ -221,12 +221,18 @@ def run(args, parser):
 
     # ======================================
     # bug fix for ray1.12.0
-    import psutil
-    psutil_memory_in_bytes = psutil.virtual_memory().total
-    ray._private.utils.get_system_memory = lambda: psutil_memory_in_bytes
+    # import psutil
+    # psutil_memory_in_bytes = psutil.virtual_memory().total
+    # ray._private.utils.get_system_memory = lambda: psutil_memory_in_bytes
     # ======================================
 
     ray.init(local_mode=args.local_mode, num_gpus=0)
+
+    # ======= stop studip batch fetching in evaluation ==========
+    from custom_eval import sample
+    from ray.rllib.evaluation import RolloutWorker
+    RolloutWorker.sample=sample
+    # ===================================
 
     # Create the Trainer from config.
     # cls = get_trainable_cls(args.run)

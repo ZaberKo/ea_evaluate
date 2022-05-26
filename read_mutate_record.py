@@ -11,14 +11,14 @@ def load(path):
 
 
 #%%
-draw_mode="std"
-# draw_mode="minmax"
+# draw_mode="std"
+draw_mode="minmax"
 
 def get_metrics(result:Record):
     return result.hist_episode_reward
 
 # for it in range(100,901,200):
-for it in [10,30,50,70]:
+for it in [10,30,50,70,100]:
     print(f"iteration: {it}")
     baseline_data=None
     # baseline_data=load(f"eval_result/SpaceInvaders_01_25_without_conv_frac_01/mutate_result_{it}.pkl")
@@ -92,8 +92,9 @@ for it in [10,30,50,70]:
 
 # %%
 def get_metrics(result:Record):
-    return result.hist_episode_length
-data=load(f"eval_result/BeamRider_18_05_without_conv_frac_01_new/mutate_result_50.pkl")
+    return result.hist_episode_reward
+    
+data=load(f"eval_result/BeamRider_18_05_without_conv_frac_01_new/mutate_result_30.pkl")
 y_mutate=[]
 y_mutate_std=[]
 y_mutate_min=[]

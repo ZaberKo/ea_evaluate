@@ -255,17 +255,17 @@ def run(args, parser):
     print("="*20)
 
     # ======== mutation ===========
-    for i in trange(args.mutate_nums):
-        modelweights = deepcopy_np_weights(modelweights_ori)
-        mutate_inplace(modelweights,num_mutation_frac=0.1)
-        trainer.set_weights({DEFAULT_POLICY_ID: modelweights})
+    # for i in trange(args.mutate_nums):
+    #     modelweights = deepcopy_np_weights(modelweights_ori)
+    #     mutate_inplace(modelweights,num_mutation_frac=0.1)
+    #     trainer.set_weights({DEFAULT_POLICY_ID: modelweights})
 
-        result = rollout(trainer, num_steps, num_episodes)
-        results[f"mutation {i}"] = result
-        print(f"mutation {i}: {result.summary()}")
-        # print(result.hist_episode_length)
-        # print(result.hist_episode_reward)
-        print("="*20)
+    #     result = rollout(trainer, num_steps, num_episodes)
+    #     results[f"mutation {i}"] = result
+    #     print(f"mutation {i}: {result.summary()}")
+    #     # print(result.hist_episode_length)
+    #     # print(result.hist_episode_reward)
+    #     print("="*20)
 
     trainer.stop()
 
